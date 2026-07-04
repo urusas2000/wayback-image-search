@@ -219,11 +219,24 @@ async function search() {
 
   try {
     const cdxUrl = buildCdxUrl();
-    const res = await fetch(cdxUrl);
-    if (!res.ok) {
-      throw new Error('APIからの応答エラー: ' + res.status);
+    let data;
+    try {
+      // まず直接アクセスを試みる
+      const res = await fetch(cdxUrl);
+      if (!res.ok) {
+        throw new Error('APIからの応答エラー: ' + res.status);
+      }
+      data = await res.json();
+    } catch (directErr) {
+      // 直接アクセスが失敗した場合(主にCORS)、プロキシ経由で再試行する
+      setStatus('検索中…(別経路で再試行しています)');
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(cdxUrl);
+      const proxyRes = await fetch(proxyUrl);
+      if (!proxyRes.ok) {
+        throw new Error('APIからの応答エラー: ' + proxyRes.status);
+      }
+      data = await proxyRes.json();
     }
-    const data = await res.json();
 
     if (!Array.isArray(data) || data.length <= 1) {
       setStatus('該当する画像が見つかりませんでした。');
