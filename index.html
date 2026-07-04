@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wayback Machine 画像検索</title>
+<style>
+  :root {
+    --bg: #f4f3ef;
+    --card: #ffffff;
+    --border: #ddd9d0;
+    --text: #2c2c2a;
+    --muted: #6f6d66;
+    --accent: #185fa5;
+    --accent-bg: #e6f1fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem 1rem 4rem;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  p.sub { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
+
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin: 14px 0 6px;
+  }
+  label:first-child { margin-top: 0; }
+  input[type=text], select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: #fff;
+  }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  button {
+    margin-top: 18px;
+    background: var(--text);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    margin-left: 8px;
+  }
+
+  #status { font-size: 13px; color: var(--muted); margin: 14px 0; min-height: 18px; }
+  #status.error { color: #a32d2d; }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .cell {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .cell img {
+    width: 100%;
+    height: 130px;
+    object-fit: cover;
+    display: block;
+    background: #eee;
+  }
+  .cell .meta {
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cell:hover { border-color: var(--accent); }
+
+  .empty-fallback {
+    height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    padding: 8px;
+  }
+
+  footer {
+    max-width: 900px;
+    margin: 32px auto 0;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+  }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Wayback Machine 画像検索</h1>
+  <p class="sub">Internet Archive(Wayback Machine)の CDX Server API を使って、特定URL・ドメインに保存されている画像をサムネイル表示します。</p>
+
+  <div class="panel">
+    <label for="url">対象のURL / ドメイン</label>
+    <input type="text" id="url" placeholder="例: example.com または example.com/photos/">
+    <div class="hint">「example.com」のようにドメインだけ指定するか、「example.com/gallery/」のようにパスまで指定できます。</div>
+
+    <div class="row">
+      <div>
+        <label for="matchType">一致方法</label>
+        <select id="matchType">
+          <option value="domain">domain(このドメイン配下すべて)</option>
+          <option value="prefix">prefix(このURLで始まるもの)</option>
+          <option value="exact">exact(完全一致)</option>
+        </select>
+      </div>
+      <div>
+        <label for="limit">取得件数の上限</label>
+        <select id="limit">
+          <option value="50">50件</option>
+          <option value="100" selected>100件</option>
+          <option value="300">300件</option>
+          <option value="1000">1000件</option>
+        </select>
+      </div>
+    </div>
+
+    <label for="keyword">URLに含む文字列で絞り込み(任意)</label>
+    <input type="text" id="keyword" placeholder="例: photo または .jpg">
+    <div class="hint">大文字小文字を区別しません。空欄なら絞り込みなし。</div>
+
+    <button id="searchBtn">検索する</button>
+    <button id="clearBtn" class="secondary">クリア</button>
+
+    <div id="status"></div>
+  </div>
+
+  <div id="grid"></div>
+</div>
+
+<footer>
+  データ取得元: <a href="https://archive.org/help/wayback_api.php" target="_blank" rel="noopener">Wayback Machine CDX Server API</a>
+</footer>
+
+<script>
+const urlInput = document.getElementById('url');
+const matchTypeSel = document.getElementById('matchType');
+const limitSel = document.getElementById('limit');
+const keywordInput = document.getElementById('keyword');
+const searchBtn = document.getElementById('searchBtn');
+const clearBtn = document.getElementById('clearBtn');
+const statusEl = document.getElementById('status');
+const gridEl = document.getElementById('grid');
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = isError ? 'error' : '';
+}
+
+function buildCdxUrl() {
+  const url = urlInput.value.trim();
+  const matchType = matchTypeSel.value;
+  const limit = limitSel.value;
+
+  const params = new URLSearchParams({
+    url: url,
+    matchType: matchType,
+    output: 'json',
+    filter: 'mimetype:image',
+    collapse: 'urlkey',
+    limit: limit
+  });
+
+  return 'https://web.archive.org/cdx/search/cdx?' + params.toString();
+}
+
+async function search() {
+  const url = urlInput.value.trim();
+  if (!url) {
+    setStatus('URLまたはドメインを入力してください。', true);
+    return;
+  }
+
+  searchBtn.disabled = true;
+  gridEl.innerHTML = '';
+  setStatus('検索中…');
+
+  try {
+    const cdxUrl = buildCdxUrl();
+    const res = await fetch(cdxUrl);
+    if (!res.ok) {
+      throw new Error('APIからの応答エラー: ' + res.status);
+    }
+    const data = await res.json();
+
+    if (!Array.isArray(data) || data.length <= 1) {
+      setStatus('該当する画像が見つかりませんでした。');
+      searchBtn.disabled = false;
+      return;
+    }
+
+    // 1行目はヘッダー ["urlkey","timestamp","original","mimetype","statuscode","digest","length"]
+    const header = data[0];
+    const rows = data.slice(1);
+    const originalIdx = header.indexOf('original');
+    const timestampIdx = header.indexOf('timestamp');
+
+    const keyword = keywordInput.value.trim().toLowerCase();
+    let items = rows.map(r => ({
+      original: r[originalIdx],
+      timestamp: r[timestampIdx]
+    }));
+
+    if (keyword) {
+      items = items.filter(item => item.original.toLowerCase().includes(keyword));
+    }
+
+    if (items.length === 0) {
+      setStatus('条件に一致する画像が見つかりませんでした。');
+      searchBtn.disabled = false;
+      return;
+    }
+
+    setStatus(items.length + ' 件の画像が見つかりました。');
+    renderGrid(items);
+  } catch (err) {
+    console.error(err);
+    setStatus('エラーが発生しました: ' + err.message, true);
+  } finally {
+    searchBtn.disabled = false;
+  }
+}
+
+function renderGrid(items) {
+  gridEl.innerHTML = '';
+  items.forEach(item => {
+    const thumbUrl = 'https://web.archive.org/web/' + item.timestamp + 'im_/' + item.original;
+    const pageUrl = 'https://web.archive.org/web/' + item.timestamp + '/' + item.original;
+
+    const a = document.createElement('a');
+    a.className = 'cell';
+    a.href = pageUrl;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.title = item.original;
+
+    const img = document.createElement('img');
+    img.src = thumbUrl;
+    img.loading = 'lazy';
+    img.alt = item.original;
+    img.onerror = () => {
+      img.remove();
+      const fallback = document.createElement('div');
+      fallback.className = 'empty-fallback';
+      fallback.textContent = '読み込み失敗';
+      a.insertBefore(fallback, a.firstChild);
+    };
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = item.original.split('/').pop();
+
+    a.appendChild(img);
+    a.appendChild(meta);
+    gridEl.appendChild(a);
+  });
+}
+
+searchBtn.addEventListener('click', search);
+clearBtn.addEventListener('click', () => {
+  urlInput.value = '';
+  keywordInput.value = '';
+  gridEl.innerHTML = '';
+  setStatus('');
+});
+
+urlInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') search();
+});
+</script>
+</body>
+</html>
