@@ -228,14 +228,30 @@ async function search() {
       }
       data = await res.json();
     } catch (directErr) {
-      // 直接アクセスが失敗した場合(主にCORS)、プロキシ経由で再試行する
-      setStatus('検索中…(別経路で再試行しています)');
-      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(cdxUrl);
-      const proxyRes = await fetch(proxyUrl);
-      if (!proxyRes.ok) {
-        throw new Error('APIからの応答エラー: ' + proxyRes.status);
+      // 直接アクセスが失敗した場合(主にCORS)、複数のプロキシを順番に試す
+      const proxies = [
+        'https://corsproxy.io/?url=' + encodeURIComponent(cdxUrl),
+        'https://api.allorigins.win/raw?url=' + encodeURIComponent(cdxUrl)
+      ];
+      let lastErr = directErr;
+      let success = false;
+      for (const proxyUrl of proxies) {
+        try {
+          setStatus('検索中…(別経路で再試行しています)');
+          const proxyRes = await fetch(proxyUrl);
+          if (!proxyRes.ok) {
+            throw new Error('APIからの応答エラー: ' + proxyRes.status);
+          }
+          data = await proxyRes.json();
+          success = true;
+          break;
+        } catch (proxyErr) {
+          lastErr = proxyErr;
+        }
       }
-      data = await proxyRes.json();
+      if (!success) {
+        throw lastErr;
+      }
     }
 
     if (!Array.isArray(data) || data.length <= 1) {
